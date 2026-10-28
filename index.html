@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101b35">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Euro Lira">
+  <meta name="description" content="Euro und Türkische Lira mit dem aktuellen Referenzkurs umrechnen.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="icon" href="./icon-192.png" type="image/png">
+  <title>Euro ↔ Lira</title>
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#14213d;background:#f1f5fb;font-synthesis:none}
+    *{box-sizing:border-box}body{margin:0;min-height:100svh;padding:env(safe-area-inset-top) 18px env(safe-area-inset-bottom);display:grid;place-items:center}
+    main{width:100%;max-width:440px;padding:28px 22px;background:white;border-radius:26px;box-shadow:0 16px 48px #152c5017}
+    .eyebrow{font-weight:750;letter-spacing:.1em;color:#64748b;font-size:12px;text-transform:uppercase}
+    h1{font-size:30px;letter-spacing:-.04em;margin:10px 0 6px}p{color:#66758b;line-height:1.55;margin:0 0 22px}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:8px}.mark{background:#e9efff;padding:12px;border-radius:14px;font-size:23px}
+    label{font-size:13px;font-weight:750;color:#516177;display:block;margin-bottom:9px}
+    .field{background:#f5f7fc;border:1px solid #e2e8f0;border-radius:17px;padding:15px;margin-bottom:12px}
+    .inputline{display:flex;align-items:center;gap:12px}.inputline input{width:100%;min-width:0;background:transparent;border:0;outline:0;font-size:29px;font-weight:730;color:#13213b;font-variant-numeric:tabular-nums}
+    .currency{font-weight:800;color:#20345d;white-space:nowrap;font-size:16px}
+    .controls{display:flex;align-items:center;justify-content:space-between;margin:4px 0 15px;gap:8px}
+    button{border:none;border-radius:12px;padding:12px 15px;cursor:pointer;font-size:15px;font-weight:700;color:#fff;background:#2449c7}
+    button:focus-visible,input:focus-visible{outline:3px solid #93b5fd;outline-offset:2px}
+    button.secondary{background:#eaf0ff;color:#2847a2}
+    .rate{padding:16px;background:#edf3ff;border-radius:16px;margin:17px 0 0;color:#1d3667}
+    .rate strong{display:block;font-size:19px;margin-top:6px}
+    .status{font-size:13px;color:#586b84;margin-top:10px;min-height:19px}
+    .warning{color:#a33b16}.foot{font-size:12px;margin:20px 2px 0;color:#6d7789}
+    @media(prefers-color-scheme:dark){:root{background:#0c1426;color:#eaf0ff}main{background:#17223a}h1{color:#f3f6ff}p,.foot{color:#a7b5cb}.eyebrow,label{color:#a7b5cb}.field{background:#202e49;border-color:#344460}.inputline input{color:white}.currency{color:#e2eaff}.rate{background:#20355c;color:#e8efff}.status{color:#b2c1d8}.warning{color:#ffad88}.mark{background:#273d6c}button.secondary{background:#263d6d;color:#e7eeff}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="top"><span class="eyebrow">Währungsrechner</span><span class="mark" aria-hidden="true">€ ↔ ₺</span></div>
+  <h1>Euro ↔ Lira</h1>
+  <p>Einfach umrechnen mit dem neuesten verfügbaren Referenzkurs.</p>
+  <section class="field"><label for="amount">Betrag eingeben</label><div class="inputline"><input id="amount" type="text" inputmode="decimal" autocomplete="off" value="100" aria-label="Betrag"><span class="currency" id="fromLabel">🇪🇺 EUR</span></div></section>
+  <div class="controls"><button id="swap" class="secondary" type="button">⇅ Richtung wechseln</button><button id="refresh" type="button">↻ Aktualisieren</button></div>
+  <section class="field"><label for="result">Umgerechneter Betrag</label><div class="inputline"><input id="result" type="text" readonly aria-label="Umgerechneter Betrag"><span class="currency" id="toLabel">🇹🇷 TRY</span></div></section>
+  <div class="rate"><span>Referenzkurs</span><strong id="rateDisplay">Kurs wird geladen …</strong><div id="rateDate" class="status" aria-live="polite"></div></div>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+  <div class="foot">Quelle: Frankfurter API. Tages-Referenzkurse, keine Live-Handelskurse. Banken und Wechselstuben können abweichende Kurse und Gebühren verwenden. Für neue Kurse wird Internet benötigt.</div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const API = 'https://api.frankfurter.dev/v2/rate/eur/try';
+  const $ = id => document.getElementById(id);
+  const amount = $('amount'), result = $('result');
+  const formatter = new Intl.NumberFormat('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2});
+  let rate = null, rateDate = null, reversed = false, cached = false;
+
+  function parseAmount(str) {
+    const text = str.trim().replace(/\s/g, '');
+    if (!text) return null;
+    // Deutsch: 1.234,50; alternativ: 1234.50
+    let normalized = text;
+    if (text.includes(',')) normalized = text.replace(/\./g, '').replace(',', '.');
+    else if (/^\d{1,3}(\.\d{3})+$/.test(text)) normalized = text.replace(/\./g, '');
+    if (!/^\d+(\.\d+)?$/.test(normalized)) return NaN;
+    return Number(normalized);
+  }
+  function recalc() {
+    const value = parseAmount(amount.value);
+    if (value === null) { result.value=''; $('status').textContent='Bitte einen Betrag eingeben.'; return; }
+    if (!Number.isFinite(value) || value < 0) { result.value=''; $('status').textContent='Bitte eine gültige positive Zahl eingeben.'; return; }
+    if (!rate) {result.value='';return;}
+    const converted = reversed ? value / rate : value * rate;
+    result.value = formatter.format(converted);
+    $('status').textContent = cached ? 'Offline/Verbindung fehlgeschlagen: zuletzt gespeicherter Kurs.' : 'Berechnung mit dem letzten verfügbaren Tageskurs.';
+  }
+  function showRate() {
+    $('fromLabel').textContent=reversed ? '🇹🇷 TRY' : '🇪🇺 EUR';
+    $('toLabel').textContent=reversed ? '🇪🇺 EUR' : '🇹🇷 TRY';
+    $('rateDisplay').textContent = rate ? (reversed ? `1 TRY = ${(1 / rate).toLocaleString('de-DE',{maximumFractionDigits:6})} EUR` : `1 EUR = ${rate.toLocaleString('de-DE',{maximumFractionDigits:6})} TRY`) : 'Kein Kurs verfügbar';
+    $('rateDate').textContent = rateDate ? `Kursdatum: ${rateDate}` : 'Internetverbindung erforderlich';
+    recalc();
+  }
+  async function loadRate() {
+    $('refresh').disabled=true;
+    $('status').textContent='Kurs wird abgerufen …';
+    try {
+      const response = await fetch(API, {cache:'no-store'});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (typeof data.rate !== 'number' || !(data.rate > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(data.date)) throw new Error('Ungültige API-Antwort');
+      rate=data.rate;rateDate=data.date;cached=false;
+      try {localStorage.setItem('lastRate',JSON.stringify({rate,rateDate}));} catch (_) {}
+    } catch (error) {
+      cached=true;
+      if (!rate) {
+        try {const saved=JSON.parse(localStorage.getItem('lastRate')||'null');if(saved && saved.rate>0 && typeof saved.rate==='number' && typeof saved.rateDate==='string'){rate=saved.rate;rateDate=saved.rateDate;}}catch(_){}
+      }
+      if (!rate) $('status').textContent='Kurs konnte nicht geladen werden. Bitte Internetverbindung prüfen.';
+    } finally { $('refresh').disabled=false; showRate(); }
+  }
+  amount.addEventListener('input',recalc);
+  $('swap').addEventListener('click',()=>{reversed=!reversed;showRate();});
+  $('refresh').addEventListener('click',loadRate);
+  try {const saved=JSON.parse(localStorage.getItem('lastRate')||'null');if(saved&&typeof saved.rate==='number'&&saved.rate>0&&typeof saved.rateDate==='string'){rate=saved.rate;rateDate=saved.rateDate;cached=true;showRate();}}catch(_){}
+  loadRate();
+  if('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('./sw.js').catch(()=>{});
+})();
+</script>
+</body>
+</html>
